@@ -15,6 +15,8 @@ MODELS = {'ZV900': 'DJI Goggles 2', 'ZV901': 'DJI Goggles Integra'}
 # Identity codes from other sources that have not displayed video through the PC route.
 # ZV902 is Goggles 3, as named by github.com/ggurov/dji-goggles3-display-unit.
 EXPERIMENTAL_MODELS = {'ZV902': 'DJI Goggles 3'}
+SIMULATOR_SILENT = ('The goggles answered but ignored simulator mode. '
+                    'Open More > DJI Virtual Flight on the goggles')
 
 
 class SessionError(RuntimeError):
@@ -91,6 +93,10 @@ class ControlSession:
                 # The next heartbeat replaces this expired request.
                 del self.pending[seq]
             elif item.attempts >= 3:
+                if (item.packet.command_set, item.packet.command_id) == (0x0b, 0x1a):
+                    # Heartbeats and identity still answer outside Virtual Flight, but simulator
+                    # mode gets no reply at all, on firmware 01.11 and 01.14 alike.
+                    self._fail(SIMULATOR_SILENT, SessionLost)
                 self._fail('Control request received no response after three attempts', SessionLost)
             else:
                 item.attempts += 1

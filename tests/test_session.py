@@ -1,7 +1,7 @@
 from dataclasses import replace
 import unittest
 from goggles_bridge.control import V1Packet
-from goggles_bridge.session import ControlSession, SessionError, MODELS, EXPERIMENTAL_MODELS
+from goggles_bridge.session import ControlSession, SessionError, SessionLost, MODELS, EXPERIMENTAL_MODELS
 
 
 def answer(request, payload=b'\0'):
@@ -23,6 +23,33 @@ class SessionTests(unittest.TestCase):
         self.assertEqual(session.state, 'ready')
         self.assertTrue(session.identity.startswith('E3T ZV900'))
         self.assertEqual(session.model, 'DJI Goggles 2')
+
+    def test_firmware_0114_exchange(self):
+        # Goggles 2 firmware 01.14.0000 (E3T 10.00.81.97), captured November 8, 2026.
+        session = ControlSession()
+        hb, = session.poll(0)
+        self.assertEqual(hb.serialize().hex(), '551304032a1c0000400000000020000000b5b2')
+        info, = session.receive(V1Packet.parse(bytes.fromhex('5514046d1c2a0000c0000000000020000000e26f')), .01)
+        self.assertEqual(info.serialize().hex(), '550e04662a3c01004000ff002b4b')
+        mode, = session.receive(V1Packet.parse(bytes.fromhex(
+            '552f04633c2a0100c000ff00453354205a563930302041432041756720313120323032367c30373a32313a3237898e')), .02)
+        self.assertEqual(mode.serialize().hex(), '551104922a1c0200400b1a010100009c1f')
+        session.receive(V1Packet.parse(bytes.fromhex('550e04661c2a0200c00b1a0082c9')), .03)
+        self.assertEqual(session.state, 'ready')
+        self.assertEqual(session.identity, 'E3T ZV900 AC Aug 11 2026|07:21:27')
+        self.assertEqual(session.model, 'DJI Goggles 2')
+
+    def test_silent_simulator_mode_points_to_virtual_flight(self):
+        session = ControlSession()
+        request, = session.poll(0)
+        info, = session.receive(answer(request), .01)
+        mode, = session.receive(answer(info, b'\0E3T ZV900 AC'), .02)
+        for now in (.52, 1.02):
+            due = session.poll(now)
+            self.assertIn(mode, due)
+            session.receive(answer(next(p for p in due if p.command_id == 0)), now+.01)
+        with self.assertRaisesRegex(SessionLost, 'DJI Virtual Flight'):
+            session.poll(1.53)
 
     def test_integra_identity_is_detected(self):
         session = ControlSession()
