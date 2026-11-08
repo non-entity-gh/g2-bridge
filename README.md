@@ -6,7 +6,7 @@ The bridge detects the model when it connects:
 
 | Goggles | Identity | Tested firmware |
 | --- | --- | --- |
-| DJI Goggles 2 | `E3T ZV900` | 01.11.00.00 |
+| DJI Goggles 2 | `E3T ZV900` | 01.11.00.00, 01.14.00.00 |
 | DJI Goggles Integra | `E3T ZV901` | 01.09.00.00 |
 
 We measured **about 12 ms median monitor-to-lens delay** at 1080p100. See [how we measured it](docs/LATENCY.md).
@@ -33,7 +33,7 @@ The stream script offers to install whatever is missing. Tests used an M2 Pro Ma
 
 ## Start streaming
 
-1. Power on the goggles, connect a USB data cable, and open **More > DJI Virtual Flight**. On a Mac, when macOS asks whether the accessory can connect, select **Allow**.
+1. Power on the goggles, connect a USB data cable, and open **More > DJI Virtual Flight**. The goggles answer the bridge outside Virtual Flight but ignore its request to start video, so the bridge waits until this screen is open. On a Mac, when macOS asks whether the accessory can connect, select **Allow**.
 2. From the repository root, install the Python dependencies.
 
    On Windows, run:
@@ -74,12 +74,23 @@ Use these options to adjust the stream:
 | Option | Values |
 | --- | --- |
 | `--fps` | `60`, `100` |
-| `--bitrate-mbps` | `8`, `10`, `12`, `16`, `20`, `24` |
+| `--bitrate-mbps` | `8` to `40`; at `60` fps, at most `24`. See [picture quality](#picture-quality-and-frame-pacing) |
+| `--vbv-frames` | Encoder rate-control buffer in frames: `2`, `4`, `8`, `16`. The bridge caps it so keyframes stay under the goggles' frame limit |
+| `--no-aq` | Turn off NVENC adaptive quantization (Windows) |
+| `--preset` | NVENC preset `p1`, `p4`, `p5`, `p6`, `p7` (Windows). `p7` measured no gain over `p4` |
 | `--display` | Monitor index, starting at `0` |
 | `--hide-cursor` | Hide the mouse pointer |
 | `--capture` | Windows: `gfxcapture` or `ddagrab`. macOS: `screencapturekit` or `avfoundation` |
 
 Run `python scripts/stream_desktop.py --help` for all options.
+
+## Picture quality and frame pacing
+
+The default 20 Mbps keeps the measured latency. On a desktop GPU, `--bitrate-mbps 40` roughly halves the visible compression; it adds about 1 ms of USB time per frame. Adaptive quantization is on by default and sharpens detailed scenes at no cost.
+
+The goggles accept at most about 64 KB per encoded frame. A larger frame is dropped, and one arriving mid-stream can freeze the picture or leave the goggles on a black screen that only a power cycle clears. The bridge caps the encoder buffer so keyframes stay under 56 KB, refuses bitrate and frame-rate pairs whose ordinary frames would be too large, and skips any frame over the limit with a message. Each status line shows the largest frame sent in the last five seconds. See [the measurements](docs/research/EXPERIMENTS.md#frame-size-limit-and-bitrate).
+
+The goggles run at 100 Hz. If the monitor runs at another rate, the stream repeats or skips frames unevenly. For a steady picture, run the monitor at 100 Hz, or in a game cap the frame rate at 100 fps with variable refresh rate enabled.
 
 ## Run tests
 

@@ -1,6 +1,6 @@
 # Goggles 2 PC video protocol
 
-This protocol displayed video on a stock DJI Goggles 2 with reported firmware 01.11.00.00. It adapts the Android Virtual Flight application's video metadata to the PC USB interface.
+This protocol displayed video on a stock DJI Goggles 2 with firmware 01.11.00.00 and 01.14.00.00. The control exchange is byte-identical on both. It adapts the Android Virtual Flight application's video metadata to the PC USB interface.
 
 ## Source artifacts
 
@@ -36,7 +36,7 @@ PC control uses V1 source type 10, ID 1. Each reply must match the route, comman
 | Identity `00/ff` | Type 28, ID 1 | `00` |
 | Simulator mode `0b/1a` | Type 28, ID 0 | `01010000` |
 
-The tested identity contains `E3T ZV900 AC`. Heartbeats continue every 500 ms. A successful simulator-mode reply completes the handshake. Video acceptance was checked separately with a moving test pattern.
+The tested identity contains `E3T ZV900 AC`. Heartbeats continue every 500 ms. A successful simulator-mode reply completes the handshake. Outside the Virtual Flight screen, heartbeat and identity are still answered, but simulator mode gets no reply from `28/0` and status `e0` from `28/1`, `28/2`, and `28/4`. The bridge reports this case as Virtual Flight not being open and keeps retrying. Video acceptance was checked separately with a moving test pattern.
 
 ## Video packets
 
@@ -56,6 +56,8 @@ The video payload starts with this little-endian structure, followed by the enco
 | 20 | 4 | Encoded bytes in this chunk |
 | 24 | 1 | First fragment of frame |
 | 25 | 7 | Zero padding |
+
+The receiver accepts at most about 65,536 bytes per frame; see the [frame-size measurements](research/EXPERIMENTS.md#frame-size-limit-and-bitrate). Frames of 42 KB and below displayed. Streams whose keyframes reached 67 KB and above appeared late, froze, or stayed black, and a frozen receiver only recovered after a power cycle. This matches the 65,404-byte fragment limit of the mobile protocol. The bridge never sends a larger frame.
 
 The timestamp follows the native operation: sample Unix milliseconds, retain the low 32 bits, interpret them as signed, then sign-extend to 64 bits. The packet header CRC8 uses seed `0x77` and reflected polynomial `0x8c`. CRC16 uses seed `0x3692` and reflected polynomial `0x8408`, with no final XOR.
 

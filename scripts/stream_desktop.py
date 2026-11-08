@@ -13,6 +13,7 @@ import uuid
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from goggles_bridge import mac_capture
+from goggles_bridge.engine import BITRATES_MBPS, PRESETS, VBV_FRAMES
 from goggles_bridge.usb_transport import DEFAULT_DLL, USB_WRITE_SIZES
 
 MAC = sys.platform == 'darwin'
@@ -70,7 +71,11 @@ def main():
     parser.add_argument('--python-deps', type=Path, help='Optional directory containing PyUSB 1.3.1')
     parser.add_argument('--fps', type=int, choices=(60, 100), default=100,
                         help='Target encoder frame rate (default: 100)')
-    parser.add_argument('--bitrate-mbps', type=int, choices=(8, 10, 12, 16, 20, 24), default=20)
+    parser.add_argument('--bitrate-mbps', type=int, choices=BITRATES_MBPS, default=20)
+    parser.add_argument('--vbv-frames', type=int, choices=VBV_FRAMES, default=2,
+                        help='Rate-control buffer in frames; larger values give keyframes more bytes (default: 2)')
+    parser.add_argument('--aq', action=argparse.BooleanOptionalAction, default=True,
+                        help='NVENC spatial and temporal adaptive quantization (Windows only; default: on)')
     parser.add_argument('--capture', choices=('screencapturekit', 'avfoundation') if MAC else ('gfxcapture', 'ddagrab'),
                         default=MAC_CAPTURE if MAC else 'gfxcapture',
                         help='Windows: Graphics Capture with GPU scaling, or Desktop Duplication with CPU scaling. '
@@ -78,7 +83,8 @@ def main():
     parser.add_argument('--capture-fps', type=int, default=240, help='Maximum capture rate, in fps')
     parser.add_argument('--display', type=int, default=0, help='Zero-based monitor index')
     parser.add_argument('--hide-cursor', action='store_true')
-    parser.add_argument('--preset', choices=('p1', 'p4'), default='p4', help='NVENC preset (Windows only)')
+    parser.add_argument('--preset', choices=PRESETS, default='p4',
+                        help='NVENC preset, p1 fastest to p7 best quality (Windows only; default: p4)')
     parser.add_argument('--h264-profile', choices=('baseline', 'high'), default='high',
                         help='H.264 profile (default: high)')
     parser.add_argument('--keyframe-seconds', type=int, choices=(1, 3), default=3)
@@ -125,7 +131,11 @@ def main():
         elif event == 'streaming':
             print(f'Streaming 1920x1080 at target {args.fps} fps, {args.bitrate_mbps} Mbps. Ctrl+C stops.', flush=True)
         elif event == 'stats':
-            print(f"Sent {row['fps']:.1f} fps | queue p95 {row['queue_ms_p95']:.1f} ms | send p95 {row['send_ms_p95']:.1f} ms", flush=True)
+            print(f"Sent {row['fps']:.1f} fps | queue p95 {row['queue_ms_p95']:.1f} ms | send p95 {row['send_ms_p95']:.1f} ms"
+                  f" | largest frame {row['frame_bytes_max']/1024:.0f} KB", flush=True)
+        elif event == 'oversize_frame':
+            print(f"Skipped a {row['bytes']/1024:.0f} KB frame: the goggles accept at most {row['limit']/1024:.0f} KB per frame. "
+                  'Lower --bitrate-mbps or --vbv-frames.', flush=True)
         elif event == 'ready':
             print(f"Found {row['model']} ({row['identity']})", flush=True)
         elif event in ('connected', 'stopped'):
@@ -135,7 +145,8 @@ def main():
         settings = BridgeSettings(args.dll, args.ffmpeg, fps=args.fps, bitrate_mbps=args.bitrate_mbps,
             capture=args.capture, capture_fps=args.capture_fps, display_index=args.display,
             show_cursor=not args.hide_cursor, preset=args.preset, keyframe_seconds=args.keyframe_seconds,
-            low_latency=args.low_latency, usb_write_size=args.usb_write_size, h264_profile=args.h264_profile)
+            low_latency=args.low_latency, usb_write_size=args.usb_write_size, h264_profile=args.h264_profile,
+            vbv_frames=args.vbv_frames, adaptive_quant=args.aq)
         print('Checking screen capture...', flush=True)
         problem = check_encoder(settings)
         if problem:

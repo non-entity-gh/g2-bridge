@@ -19,6 +19,19 @@ from .session import ControlSession, SessionLost
 from .usb_transport import ControlUsb, UsbTransportError, USB_WRITE_SIZES
 
 
+BITRATES_MBPS = (8, 10, 12, 16, 20, 24, 30, 40)
+PRESETS = ('p1', 'p4', 'p5', 'p6', 'p7')
+VBV_FRAMES = (2, 4, 8, 16)
+# Goggles 2 displayed every stream whose frames stayed under about 42 KB and dropped or
+# froze on streams whose keyframes reached 67 KB and more, consistent with the 65,404-byte
+# fragment limit of the mobile protocol. An oversize frame can leave the goggles on a black
+# screen until power-cycled, so the bridge never sends one and keeps the encoder's
+# rate-control buffer small enough that keyframes stay below the limit with headroom.
+MAX_FRAME_BYTES = 65536
+SAFE_FRAME_BYTES = 56_000
+MAX_VBV_BITS = SAFE_FRAME_BYTES * 8
+
+
 @dataclass(frozen=True)
 class BridgeSettings:
     dll: Path
@@ -34,17 +47,31 @@ class BridgeSettings:
     low_latency: bool = True
     usb_write_size: int = 16384
     h264_profile: str = 'high'
+    # Rate-control buffer in frames. Two frames keeps bursts short but forces keyframes
+    # into a two-frame budget, which shows as a blocky picture every keyframe interval.
+    vbv_frames: int = 2
+    # NVENC spatial and temporal adaptive quantization (Windows only). It costs no
+    # measurable encode time and scores higher on detailed scenes at the same bitrate.
+    adaptive_quant: bool = True
 
     def __post_init__(self):
         if type(self.low_latency) is not bool:
             raise ValueError('low_latency must be a boolean')
+        if type(self.adaptive_quant) is not bool:
+            raise ValueError('adaptive_quant must be a boolean')
         if type(self.usb_write_size) is not int or self.usb_write_size not in USB_WRITE_SIZES:
             raise ValueError(f'Unsupported USB write size: {self.usb_write_size}')
-        for name, choices in (('fps', (60, 100)), ('bitrate_mbps', (8, 10, 12, 16, 20, 24)),
-                              ('capture', ('gfxcapture', 'ddagrab', 'avfoundation', 'screencapturekit')), ('preset', ('p1', 'p4')),
-                              ('keyframe_seconds', (1, 3)), ('h264_profile', ('baseline', 'high'))):
+        for name, choices in (('fps', (60, 100)), ('bitrate_mbps', BITRATES_MBPS),
+                              ('capture', ('gfxcapture', 'ddagrab', 'avfoundation', 'screencapturekit')), ('preset', PRESETS),
+                              ('keyframe_seconds', (1, 3)), ('h264_profile', ('baseline', 'high')),
+                              ('vbv_frames', VBV_FRAMES)):
             if getattr(self, name) not in choices:
                 raise ValueError(f'Unsupported {name}: {getattr(self, name)}')
+        # In CBR the buffer cap bounds keyframes, but ordinary frames average bitrate/fps
+        if self.bitrate_mbps * 1_000_000 // (8 * self.fps) > SAFE_FRAME_BYTES:
+            limit = max(b for b in BITRATES_MBPS if b * 1_000_000 // (8 * self.fps) <= SAFE_FRAME_BYTES)
+            raise ValueError(f'{self.bitrate_mbps} Mbps at {self.fps} fps makes frames larger than the goggles '
+                             f'accept; use at most {limit} Mbps at {self.fps} fps')
         if type(self.capture_fps) is not int or not self.fps <= self.capture_fps <= 1000:
             raise ValueError('Capture ceiling must be between output fps and 1000')
         if type(self.display_index) is not int or self.display_index < 0:
@@ -74,8 +101,11 @@ def encoder_command(settings):
                     'hwdownload,format=bgra,scale=1920:1080:force_original_aspect_ratio=decrease:flags=fast_bilinear,'
                     'pad=1920:1080:(ow-iw)/2:(oh-ih)/2,format=nv12']
     command += ['-an', '-c:v', 'h264_nvenc', '-preset', settings.preset, '-tune', 'ull', '-rc', 'cbr',
-                '-b:v', str(bitrate), '-maxrate', str(bitrate), '-bufsize', str(bitrate*2//settings.fps),
-                '-zerolatency', '1', '-delay', '0', '-bf', '0', '-g', str(settings.fps*settings.keyframe_seconds),
+                '-b:v', str(bitrate), '-maxrate', str(bitrate),
+                '-bufsize', str(min(bitrate*settings.vbv_frames//settings.fps, MAX_VBV_BITS))]
+    if settings.adaptive_quant:
+        command += ['-spatial-aq', '1', '-temporal-aq', '1']
+    command += ['-zerolatency', '1', '-delay', '0', '-bf', '0', '-g', str(settings.fps*settings.keyframe_seconds),
                 '-profile:v', settings.h264_profile, '-level:v', '4.2' if settings.fps == 60 else '5.1',
                 '-aud', '1', '-forced-idr', '1', '-flush_packets', '1']
     if settings.low_latency:
@@ -96,7 +126,8 @@ def _mac_encoder_args(settings, bitrate):
                    'pad=1920:1080:(ow-iw)/2:(oh-ih)/2',
             # low_delay enables low-latency rate control, which rejects plain baseline
             '-an', '-c:v', 'h264_videotoolbox', '-realtime', '1', '-prio_speed', '1', '-flags', '+low_delay',
-            '-b:v', str(bitrate), '-maxrate', str(bitrate), '-bufsize', str(bitrate*2//settings.fps),
+            '-b:v', str(bitrate), '-maxrate', str(bitrate),
+            '-bufsize', str(min(bitrate*settings.vbv_frames//settings.fps, MAX_VBV_BITS)),
             '-bf', '0', '-g', str(settings.fps*settings.keyframe_seconds),
             '-profile:v', 'constrained_baseline' if settings.h264_profile == 'baseline' else 'high',
             '-level:v', '4.2' if settings.fps == 60 else '5.1', '-flush_packets', '1',
@@ -196,7 +227,8 @@ class BridgeEngine:
                       resolution='1920x1080', preset=self.settings.preset,
                       keyframe_seconds=self.settings.keyframe_seconds, display_index=self.settings.display_index,
                       low_latency=self.settings.low_latency, usb_write_size=self.settings.usb_write_size,
-                      h264_profile=self.settings.h264_profile)
+                      h264_profile=self.settings.h264_profile, vbv_frames=self.settings.vbv_frames,
+                      adaptive_quant=self.settings.adaptive_quant)
             try:
                 attempt = 0
                 while not self.stopping():
@@ -228,7 +260,7 @@ class BridgeEngine:
         packetizer = PcVideoPacketizer()
         process = None
         threads = []
-        frame_count = byte_count = previous_frames = 0
+        frame_count = byte_count = previous_frames = oversize_count = largest_frame = 0
         queue_times, send_times = [], []
         last_frame = last_progress = time.perf_counter()
         encoder_path = self.log_path.with_name(f'{self.log_path.stem}.encoder-{attempt}.log')
@@ -304,6 +336,11 @@ class BridgeEngine:
                                 raise RuntimeError(f'No video from display. See {encoder_path}')
                             continue
                         last_frame = time.perf_counter()
+                        if len(frame) > MAX_FRAME_BYTES:
+                            oversize_count += 1
+                            self.emit('oversize_frame', bytes=len(frame), limit=MAX_FRAME_BYTES)
+                            continue
+                        largest_frame = max(largest_frame, len(frame))
                         queue_times.append((last_frame-completed_at)*1000)
                         wire = b''.join(packet.serialize() for packet in
                                         packetizer.packetize(frame, session.reserve_sequence))
@@ -321,8 +358,9 @@ class BridgeEngine:
                             return round(sorted(values)[int((len(values)-1)*.95)], 2) if values else 0
                         self.emit('stats', frames=frame_count, bytes=byte_count, queued_frames=frames.qsize(),
                                   fps=round((frame_count-previous_frames)/(now-last_progress), 2),
-                                  queue_ms_p95=p95(queue_times), send_ms_p95=p95(send_times))
-                        previous_frames, last_progress = frame_count, now
+                                  queue_ms_p95=p95(queue_times), send_ms_p95=p95(send_times),
+                                  frame_bytes_max=largest_frame, oversize_frames=oversize_count)
+                        previous_frames, last_progress, largest_frame = frame_count, now, 0
                         queue_times.clear()
                         send_times.clear()
             finally:
