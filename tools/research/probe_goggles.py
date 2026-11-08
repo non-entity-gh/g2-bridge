@@ -5,7 +5,9 @@ Each step runs only when requested, and every USB exchange goes to a JSON Lines 
 1. Descriptors (always): list DJI USB devices and check MI04 against the
    tested Goggles 2 control interface. Reads descriptors only.
 2. Identity (default): claim MI04, exchange heartbeats, and read the identity
-   reply. These are the same read-only requests DJI Assistant sends.
+   reply. These are the same read-only requests DJI Assistant sends. Then read
+   the firmware manifest (00/4f to 28/5) to record the firmware and module
+   versions. That read is also read-only; --no-firmware skips it.
 3. Simulator mode (--simulator): send 0b/1a and record the goggles' status.
 4. Test video (--test-video, needs --simulator): after a success reply, send the
    synthetic 1920x1080 test picture at 30 fps until the run ends.
@@ -33,6 +35,7 @@ import time
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 from goggles_bridge.control import V1Packet, V1Stream
+from goggles_bridge.firmware import ManifestReader
 from goggles_bridge.pc_video import PcVideoPacketizer
 from goggles_bridge.session import ControlSession, SessionError, MODELS, EXPERIMENTAL_MODELS
 from goggles_bridge.usb_transport import DEFAULT_DLL, _select_control_device
@@ -177,6 +180,20 @@ class RouteScan:
         self.current = dict(request=request, receiver_id=receiver_id, sequence=sequence, sent_at=now, replies=[])
 
 
+def report_firmware(log, reader):
+    """Log and print the manifest result once, returning the summary for the result row."""
+    if reader.error:
+        summary = dict(error=reader.error, bytes=len(reader.data))
+        print(f'  Firmware manifest: {reader.error}', flush=True)
+    else:
+        summary = dict(reader.manifest.as_dict(), bytes=len(reader.data), chunks=reader.chunks)
+        print(f"  Firmware: {summary['firmware']} (device {summary['device']})", flush=True)
+        for module in summary['modules']:
+            print(f"    module {module['id']} {module['name']}: {module['version']} ({module['file']})", flush=True)
+    log('firmware', **summary, container_hex=bytes(reader.data).hex())
+    return summary
+
+
 def probe_session(log, args):
     from goggles_bridge.usb_transport import ControlUsb
     session = ControlSession(models={**MODELS, **EXPERIMENTAL_MODELS}, enter_simulator=args.simulator)
@@ -185,9 +202,10 @@ def probe_session(log, args):
     packetizer = PcVideoPacketizer()
     frame = TEST_FRAME.read_bytes() if args.test_video or args.force_video else None
     scan = RouteScan(log) if args.scan else None
+    firmware = None if args.no_firmware else ManifestReader()
     if frame is not None and hashlib.sha256(frame).hexdigest() != TEST_FRAME_SHA256:
         raise RuntimeError(f'Unexpected test frame hash: {TEST_FRAME}')
-    result = dict(state=None, identity=None, model=None, frames_sent=0, error=None)
+    result = dict(state=None, identity=None, model=None, firmware=None, frames_sent=0, error=None)
     previous = None
     next_frame = None
     started = time.monotonic()
@@ -210,6 +228,8 @@ def probe_session(log, args):
                     log('packet', **describe_packet(packet))
                     if scan:
                         scan.receive(packet)
+                    if firmware:
+                        firmware.receive(packet)
                     for request in session.receive(packet, time.monotonic()):
                         send(request)
                 if session.state != previous:
@@ -227,6 +247,12 @@ def probe_session(log, args):
                         if frame is not None:
                             print(f'Step 4: sending the test picture at {TEST_VIDEO_FPS} fps; watch the lenses')
                             next_frame = time.monotonic()
+                if firmware and session.state in ('identified', 'simulator', 'ready'):
+                    if not firmware.done:
+                        for request in firmware.poll(time.monotonic(), session.reserve_sequence):
+                            send(request)
+                    if firmware.done and result['firmware'] is None:
+                        result['firmware'] = report_firmware(log, firmware)
                 if session.state == 'identified' and scan and not scan.done:
                     if not scan.results and scan.current is None:
                         print('Scan: one request at a time, waiting 0.6 s for replies')
@@ -267,6 +293,7 @@ def main():
     parser.add_argument('--test-video', action='store_true', help='Step 4: send the test picture after simulator mode')
     parser.add_argument('--scan', action='store_true', help='Send identity and simulator requests to 28/0-28/7')
     parser.add_argument('--force-video', action='store_true', help='Send the test picture without simulator mode')
+    parser.add_argument('--no-firmware', action='store_true', help='Skip the read-only firmware manifest read')
     parser.add_argument('--allow-superspeed', action='store_true', help='Claim MI04 on an untested SuperSpeed link')
     parser.add_argument('--seconds', type=float, default=15, help='Session length in seconds, from 5 to 300')
     args = parser.parse_args()

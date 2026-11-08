@@ -1,6 +1,6 @@
 # Reverse-engineering data and tools
 
-Windows and macOS video input work through the stock DJI Goggles 2 PC USB interface in Virtual Flight mode. The tested device identified itself as ZV900 and had reported firmware 01.11.00.00. A moving test pattern, the Windows desktop, Uncrashed, and the macOS desktop displayed in the lenses.
+Windows and macOS video input work through the stock DJI Goggles 2 PC USB interface in Virtual Flight mode. The tested device identified itself as ZV900 and had reported firmware 01.11.00.00. The same device on firmware 01.14.00.00 also displayed the test pattern and the Windows desktop; see [firmware 01.14](EXPERIMENTS.md#firmware-0114). A moving test pattern, the Windows desktop, Uncrashed, and the macOS desktop displayed in the lenses.
 
 The bridge carries the mobile application's 32-byte video metadata in **DUML V1 `0b/53` packets on MI04**, with 978 encoded bytes per fragment. The original mobile V2 envelope matched native output in emulation but did not display video through this PC connection.
 
