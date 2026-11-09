@@ -11,7 +11,23 @@ The bridge detects the model when it connects:
 
 We measured **about 12 ms median monitor-to-lens delay** at 1080p100. See [how we measured it](docs/LATENCY.md).
 
-## Requirements
+## Windows app
+
+The easiest way to use the bridge on Windows is the packaged app. It needs no Python and includes FFmpeg.
+
+1. Install [DJI Assistant 2 (Consumer Drones Series)](https://www.dji.com/downloads/softwares/dji-assistant-2-consumer-drones-series). It installs the USB driver the goggles need. You probably have it already if you update your goggles from a PC.
+2. Download `G2-Bridge-<version>-windows.zip` from the [latest release](../../releases/latest), extract it anywhere, and start **G2 Bridge.exe**. Keep the `ffmpeg` folder next to the exe.
+3. Power on the goggles, connect a USB data cable, and open **More > DJI Virtual Flight**. Choose a picture setting and press **Start streaming**.
+
+The window picks the monitor by name, warns when the monitor's refresh rate will make motion uneven, and shows the goggles' status while streaming. If the driver is missing, it shows a download button. **Advanced settings** exposes the encoder options described below. A shortcut to `"G2 Bridge.exe" --start` begins streaming as soon as the window opens. Settings and logs live in `%LOCALAPPDATA%\G2 Bridge`.
+
+The app requires an NVIDIA GPU, like the script. See [packaging/README.md](packaging/README.md) to build it yourself.
+
+## Running from source
+
+Everything below also works from a checkout of this repository, on Windows and macOS.
+
+### Requirements
 
 On Windows, you need the following hardware and software:
 
@@ -31,7 +47,7 @@ On macOS, you need the following:
 
 The stream script offers to install whatever is missing. Tests used an M2 Pro MacBook Pro with macOS 27.0, Swift 6.4.2, and Homebrew FFmpeg 8.1.1.
 
-## Start streaming
+### Start streaming
 
 1. Power on the goggles, connect a USB data cable, and open **More > DJI Virtual Flight**. The goggles answer the bridge outside Virtual Flight but ignore its request to start video, so the bridge waits until this screen is open. On a Mac, when macOS asks whether the accessory can connect, select **Allow**.
 2. From the repository root, install the Python dependencies.
@@ -49,7 +65,7 @@ The stream script offers to install whatever is missing. Tests used an M2 Pro Ma
    .venv/bin/python -m pip install -r requirements.txt
    ```
 
-3. Start the stream.
+3. Start the stream. On Windows you can also open the settings window with `python scripts/g2_bridge_app.py`.
 
    On Windows, run:
 
