@@ -15,6 +15,8 @@ We measured **about 12 ms median monitor-to-lens delay** at 1080p100. See [how w
 
 The easiest way to use the bridge on Windows is the packaged app. It needs no Python and includes FFmpeg.
 
+![The G2 Bridge window](docs/images/app-window.png)
+
 1. Install [DJI Assistant 2 (Consumer Drones Series)](https://www.dji.com/downloads/softwares/dji-assistant-2-consumer-drones-series). It installs the USB driver the goggles need. You probably have it already if you update your goggles from a PC.
 2. Download `G2-Bridge-<version>-windows.zip` from the [latest release](../../releases/latest), extract it anywhere, and start **G2 Bridge.exe**. Keep the `ffmpeg` folder next to the exe.
 3. Power on the goggles, connect a USB data cable, and open **More > DJI Virtual Flight**. Choose a picture setting and press **Start streaming**.
