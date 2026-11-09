@@ -24,3 +24,7 @@ Thumbs.db
 # Local agent handoff notes
 /AGENTS.md
 /.agents/
+
+# Packaged app
+build/
+dist/
