@@ -200,7 +200,16 @@ The bridge then capped the VBV at 448,000 bits (56 KB) and rejected frames over 
 | 3 | 30 Mbps | 47 KB | Displayed |
 | 4 | 40 Mbps, AQ | 49 KB | Displayed |
 
-A 30-second 40 Mbps stream of the same source sent 2,962 frames at a steady 100 fps with no frames skipped. USB send time per frame rose from 1.5 ms at 20 Mbps to about 2 ms at 30 and 40 Mbps and 5.5 ms when frames reached 50 KB. The receiver's exact limit lies between 49 KB, which displayed, and 67 KB, which did not. At 100 fps and CBR, 50 Mbps makes every frame 62.5 KB, so the bridge rejects it, and at 60 fps it allows at most 24 Mbps.
+A 30-second 40 Mbps stream of the same source sent 2,962 frames at a steady 100 fps with no frames skipped. The bridge logs the time from a frame leaving the encoder to its USB write returning. Over the 12-second runs it rose only slightly with bitrate once frames were capped; the uncapped runs were slow because of their oversize keyframes:
+
+| Setting | USB send time per frame, p95 | Largest frame |
+| --- | --- | --- |
+| 20 Mbps | 1.5 ms | 42 KB |
+| 30 Mbps | 1.9 ms | 47 KB |
+| 40 Mbps, AQ, capped | 2.0 ms | 49 KB |
+| 40 Mbps, uncapped | 5.2 to 5.9 ms | 79 to 103 KB |
+
+Encoding time does not change with bitrate. The goggles' receive and decode time for a larger frame, and monitor-to-lens delay at 40 Mbps, were not measured. The receiver's exact limit lies between 49 KB, which displayed, and 67 KB, which did not. At 100 fps and CBR, 50 Mbps makes every frame 62.5 KB, so the bridge rejects it, and at 60 fps it allows at most 24 Mbps.
 
 [`encoder_quality.py`](../../tools/research/encoder_quality.py) scores the bridge's own encoder command offline against two synthetic 600-frame sources: `testsrc2` with a gray block, and a zooming Mandelbrot set for fine detail. With the VBV cap in place, the detail scene scored:
 
