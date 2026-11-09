@@ -13,6 +13,7 @@ import uuid
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from goggles_bridge import mac_capture
+from goggles_bridge.app_config import find_ffmpeg
 from goggles_bridge.engine import BITRATES_MBPS, PRESETS, VBV_FRAMES
 from goggles_bridge.usb_transport import DEFAULT_DLL, USB_WRITE_SIZES
 
@@ -65,9 +66,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--dll', type=Path, default=None if MAC else os.environ.get('DJI_USB_DLL') or DEFAULT_DLL,
                         help='Windows only: DJI x64 libusb0_device.dll (default: DJI_USB_DLL or the installed driver copy)')
-    parser.add_argument('--ffmpeg', type=Path, default=os.environ.get('GOGGLES_FFMPEG') or shutil.which('ffmpeg')
-                        or shutil.which('ffmpeg', path=str(WINGET_LINKS)),
-                        help='FFmpeg executable with NVENC or VideoToolbox and the chosen capture (default: GOGGLES_FFMPEG or PATH)')
+    parser.add_argument('--ffmpeg', type=Path, default=find_ffmpeg(),
+                        help='FFmpeg executable with NVENC or VideoToolbox and the chosen capture '
+                             '(default: the app folder, GOGGLES_FFMPEG, or PATH)')
     parser.add_argument('--python-deps', type=Path, help='Optional directory containing PyUSB 1.3.1')
     parser.add_argument('--fps', type=int, choices=(60, 100), default=100,
                         help='Target encoder frame rate (default: 100)')
